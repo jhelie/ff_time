@@ -94,7 +94,7 @@ Flip-flops identification
 -----------------------------------------------------
 --flipflops		: input file with flipflopping lipids (output of ff_detect)
 --neighbours	[15]	: flip-flops detection method, see note 3
---reverse		: browse xtc backwards
+--reverse		: browse xtc backwards [TO DO]
  
 Other options
 -----------------------------------------------------
@@ -261,7 +261,7 @@ def set_lipids_beads():
 	return
 def load_MDA_universe():
 	
-	global U
+	global U, U_lip
 	global all_atoms
 	global nb_atoms
 	global nb_frames_xtc
@@ -308,6 +308,13 @@ def load_MDA_universe():
 	frames_to_process = map(lambda f:f_start + args.frames_dt*f, range(0,(f_end - f_start)//args.frames_dt+tmp_offset))
 	nb_frames_to_process = len(frames_to_process)
 			
+	#check the leaflet selection string is valid
+	U_lip = U.selectAtoms(leaflet_sele_string)
+	if U_lip.numberOfAtoms() == 0:
+		print "Error: invalid selection string '" + str(leaflet_sele_string) + "'"
+		print "-> no particles selected."
+		sys.exit(1)
+
 	return
 def identify_ff():
 	print "\nReading selection file for flipflopping lipids..."
@@ -399,7 +406,6 @@ def identify_leaflets():
 	print "\nIdentifying leaflets..."
 	
 	#declare variables
-	global U_lip
 	global leaflet_sele
 	global leaflet_sele_atoms
 	global upper_resnums
@@ -410,9 +416,9 @@ def identify_leaflets():
 		leaflet_sele[l] = {}
 		leaflet_sele_atoms[l] = {}
 	
-	#check the leaflet selection string is valid
-	U_lip = U.selectAtoms(leaflet_sele_string)
-	if U_lip.numberOfAtoms() == 0:
+	#make sure lipids not involved in ff remain in the Universe!
+	test_beads = U.selectAtoms(leaflet_sele_string)
+	if test_beads.numberOfAtoms() == 0:
 		print "Error: invalid selection string '" + str(leaflet_sele_string) + "'"
 		print "-> no particles selected."
 		sys.exit(1)
