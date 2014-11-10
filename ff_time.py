@@ -81,6 +81,9 @@ Option	      Default  	Description
 -f			: reference structure [.gro] (required)
 -x			: trajectory file [.xtc] (required, must be in current folder unless -o is used)
 -o			: name of output folder
+-b			: beginning time (ns)
+-e			: ending time (ns)	
+-t 		[10]	: process every t-frames
 
 Leaflets identification (see note 2)
 -----------------------------------------------------
@@ -101,16 +104,19 @@ Other options
 ''')
 
 #data options
-parser.add_argument('-f', nargs=1, dest='grofilename', default=['no'], help=argparse.SUPPRESS, required=True)
-parser.add_argument('-g', nargs=1, dest='xtcfilename', default=['no'], help=argparse.SUPPRESS, required=True)
+parser.add_argument('-f', nargs=1, dest='grofilename', help=argparse.SUPPRESS, required=True)
+parser.add_argument('-x', nargs=1, dest='xtcfilename', help=argparse.SUPPRESS, required=True)
 parser.add_argument('-o', nargs=1, dest='output_folder', default=['no'], help=argparse.SUPPRESS)
+parser.add_argument('-b', nargs=1, dest='t_start', default=[-1], type=int, help=argparse.SUPPRESS)
+parser.add_argument('-e', nargs=1, dest='t_end', default=[-1], type=int, help=argparse.SUPPRESS)
+parser.add_argument('-t', nargs=1, dest='frames_dt', default=[10], type=int, help=argparse.SUPPRESS)
 
 #leaflets identification
 parser.add_argument('--bead', nargs=1, dest='beadname', default=['PO4'], help=argparse.SUPPRESS)
 parser.add_argument('--leaflets', nargs=1, dest='cutoff_leaflet', default=['optimise'], help=argparse.SUPPRESS)
 
 #flip-flops identification
-parser.add_argument('--flipflops', nargs=1, dest='selection_file_ff', default=['no'], help=argparse.SUPPRESS)
+parser.add_argument('--flipflops', nargs=1, dest='selection_file_ff', help=argparse.SUPPRESS, required=True)
 parser.add_argument('--neighbours', nargs=1, dest='neighbours', default=[15], help=argparse.SUPPRESS)
 parser.add_argument('--reverse', dest='reverse', action='store_true', help=argparse.SUPPRESS)
 
@@ -129,6 +135,9 @@ args = parser.parse_args()
 args.grofilename = args.grofilename[0]
 args.xtcfilename = args.xtcfilename[0]
 args.output_folder = args.output_folder[0]
+args.t_start=args.t_start[0]
+args.t_end=args.t_end[0]
+args.frames_dt=args.frames_dt[0]
 #leaflets identification
 args.beadname = args.beadname[0]
 args.cutoff_leaflet = args.cutoff_leaflet[0]
@@ -463,7 +472,7 @@ def check_ff(f_nb, t):
 		ff_nb_u2l[f_nb] = ff_nb_u2l[f_nb-1]
 	for l_index in lipids_ff_u2l_index:
 		if ff_times[l_index] == 0:
-			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index]p1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
+			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
 			tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)
 			if len(tmp_neighbours)> 0:
 				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
@@ -476,7 +485,7 @@ def check_ff(f_nb, t):
 		ff_nb_l2u[f_nb] = ff_nb_l2u[f_nb-1]
 	for l_index in lipids_ff_l2u_index:
 		if ff_times[l_index] == 0:
-			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index]p1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
+			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
 			tmp_neighbours = np.in1d(tmp_neighbours, upper_resnums)
 			if len(tmp_neighbours)> 0:
 				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
