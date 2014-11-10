@@ -21,13 +21,10 @@ author: Jean Helie (jean.helie@bioch.ox.ac.uk)
 git: https://github.com/jhelie/ff_time
 **********************************************
 	
-TO DO: implement the 'classic' approach back.
-
 [ DESCRITPION ]
 
-This script identifies the phospholipids which flip-flopped between two frames and
-outputs a file with their respective selection strings following the format:
- -> 'resname,resid,starting_leaflet,beadname'
+This script estimates when the flipflopping lipids identited by ff_detect actually
+flip-flops.
 	
 [ REQUIREMENTS ]
 
@@ -68,36 +65,33 @@ The following python modules are needed :
     This means that the bilayer should be as flat as possible in the gro file supplied in
     order to get a meaningful outcome.
 
-3. Identification of lipids having flip-flopped can happen in two ways:
-   (a) comparison of the results of the leaflets identification process
-    By default leaflets are identified in the second structure file using the same method as
-    in the first. Flip-flopping lipids are simply detected by comparing the content of the
-    upper and lower leaflets in each file.
+3. The same approach as in ff_detect is used. Flip-flopping lipids are considered to have
+   flip-flopped when more of their neighbours within the distance --neighbours belong to 
+   the opposite leaflet than to their starting leaflet.
+   Obviously this is a simple approach which does not take into account "false starts", i.e.
+   flip-flopping lipids which almost flip-flop at a given time but don't actually do until
+   quite later in the simulation.
+   The trajectory can be browsed backwards using --reverse to check for consistency.
 
-   (b) for systems in which lipids are still flip-flopping and the bilayer deforms significantly
-   an other approach can be specified via the --neighbours flag.
-   In this case the neighbouring lipds of each lipid are calculated and if more than half the
-   neighbours of a given lipid belong to the opposite leaflet than its initial leaflet then this
-   lipid is considered to have flip-flopped.
-   For large systems deforming a lot and involving several flip-flpos it is, for now, the only
-   solution but it is VERY slow. But you should only have to do it once to get the list of
-   flip-flopping lipids.
-   The argument of --neighbours correspond to the max distance (in Angstrom) within which to
-   consider neighbours.
 
 [ USAGE ]
 
 Option	      Default  	Description                    
 -----------------------------------------------------
 -f			: reference structure [.gro] (required)
--g			: structure in which to identify flip-flops [.gro]
+-x			: trajectory file [.xtc] (required, must be in current folder unless -o is used)
 -o			: name of output folder
 
-Lipids identification (see note 2)
+Leaflets identification (see note 2)
 -----------------------------------------------------
---bead		[PO4]	: lipids bead name, see note 2(a)
---leaflets		: leaflet identification, see note 2(b)
---neighbours	[15]	: flip-flopping lipids detection method, see note 3(b)
+--bead		[PO4]	: lipids bead name
+--leaflets		: leaflet identification
+
+Flip-flops identification
+-----------------------------------------------------
+--flipflops		: input file with flipflopping lipids (output of ff_detect)
+--neighbours	[15]	: flip-flops detection method, see note 3
+--reverse		: browse xtc backwards
  
 Other options
 -----------------------------------------------------
@@ -107,14 +101,18 @@ Other options
 ''')
 
 #data options
-parser.add_argument('-f', nargs=1, dest='reffilename', default=['no'], help=argparse.SUPPRESS, required=True)
-parser.add_argument('-g', nargs=1, dest='grofilename', default=['no'], help=argparse.SUPPRESS, required=True)
+parser.add_argument('-f', nargs=1, dest='grofilename', default=['no'], help=argparse.SUPPRESS, required=True)
+parser.add_argument('-g', nargs=1, dest='xtcfilename', default=['no'], help=argparse.SUPPRESS, required=True)
 parser.add_argument('-o', nargs=1, dest='output_folder', default=['no'], help=argparse.SUPPRESS)
 
-#lipids identification
+#leaflets identification
 parser.add_argument('--bead', nargs=1, dest='beadname', default=['PO4'], help=argparse.SUPPRESS)
 parser.add_argument('--leaflets', nargs=1, dest='cutoff_leaflet', default=['optimise'], help=argparse.SUPPRESS)
-parser.add_argument('--neighbours', nargs='?', dest='neighbours', default=["no"], const=[15], help=argparse.SUPPRESS)
+
+#flip-flops identification
+parser.add_argument('--flipflops', nargs=1, dest='selection_file_ff', default=['no'], help=argparse.SUPPRESS)
+parser.add_argument('--neighbours', nargs=1, dest='neighbours', default=[15], help=argparse.SUPPRESS)
+parser.add_argument('--reverse', dest='reverse', action='store_true', help=argparse.SUPPRESS)
 
 #other options
 parser.add_argument('--version', action='version', version='%(prog)s v' + version_nb, help=argparse.SUPPRESS)
@@ -128,13 +126,15 @@ parser.add_argument('-h','--help', action='help', help=argparse.SUPPRESS)
 #-----------------
 args = parser.parse_args()
 #data options
-args.reffilename = args.reffilename[0]
 args.grofilename = args.grofilename[0]
+args.xtcfilename = args.xtcfilename[0]
 args.output_folder = args.output_folder[0]
-#lipids identification
+#leaflets identification
 args.beadname = args.beadname[0]
 args.cutoff_leaflet = args.cutoff_leaflet[0]
-args.neighbours = args.neighbours[0]
+#flip-flops identification
+args.selection_file_ff = args.selection_file_ff[0]
+args.neighbours = float(args.neighbours[0])
 
 #=========================================================================================
 # import modules (doing it now otherwise might crash before we can display the help menu!)
@@ -192,17 +192,18 @@ except:
 #=========================================================================================
 # sanity check
 #=========================================================================================
-if not os.path.isfile(args.reffilename):
-	print "Error: file " + str(args.reffilename) + " not found."
-	sys.exit(1)
 if not os.path.isfile(args.grofilename):
 	print "Error: file " + str(args.grofilename) + " not found."
 	sys.exit(1)
-if args.neighbours != "no":
-	args.neighbours = float(args.neighbours)
-	if args.neighbours < 0:
-		print "Error: --neighbours should be greater than 0, see note 3(b)"
-		sys.exit(1)
+if not os.path.isfile(args.xtcfilename):
+	print "Error: file " + str(args.xtcfilename) + " not found."
+	sys.exit(1)
+if not os.path.isfile(args.selection_file_ff):
+	print "Error: file " + str(args.selection_file_ff) + " not found."
+	sys.exit(1)
+if args.neighbours < 0:
+	print "Error: --neighbours should be greater than 0, see note 3"
+	sys.exit(1)
 if args.cutoff_leaflet != "large" and args.cutoff_leaflet != "optimise":
 	try:
 		args.cutoff_leaflet = float(args.cutoff_leaflet)
@@ -214,7 +215,7 @@ if args.cutoff_leaflet != "large" and args.cutoff_leaflet != "optimise":
 # create folders and log file
 #=========================================================================================
 if args.output_folder=="no":
-	args.output_folder="ff_detect_" + args.reffilename[:-4] + '_' + args.grofilename[:-4]
+	args.output_folder="ff_time_" + args.grofilename[:-4] + '_' + args.xtcfilename[:-4]
 if os.path.isdir(args.output_folder):
 	print "Error: folder " + str(args.output_folder) + " already exists, choose a different output name via -o."
 	sys.exit(1)
@@ -223,11 +224,11 @@ else:
 	os.mkdir(args.output_folder)
 
 	#create log
-	filename_log=os.getcwd() + '/' + str(args.output_folder) + '/ff_detect.log'
+	filename_log=os.getcwd() + '/' + str(args.output_folder) + '/ff_time.log'
 	output_log=open(filename_log, 'w')		
-	output_log.write("[ff_detect v" + str(version_nb) + "]\n")
+	output_log.write("[ff_time v" + str(version_nb) + "]\n")
 	output_log.write("\nThis folder and its content were created using the following command:\n\n")
-	tmp_log="python ff_detect.py"
+	tmp_log="python ff_time.py"
 	for c in sys.argv[1:]:
 		tmp_log+=" " + c
 	output_log.write(tmp_log + "\n")
@@ -237,281 +238,301 @@ else:
 # FUNCTIONS DEFINITIONS
 ##########################################################################################
 
-global nb_ff
-global U_ref, U_gro
-global upper_ref, upper_gro, lower_ref, lower_gro
-nb_ff = 0
-upper_to_lower = {}
-lower_to_upper = {}
+#=========================================================================================
+# data loading
+#=========================================================================================
 
-def data_loading():
-	
-	global U_ref, U_gro
-	
-	print "\nLoading files..."
-	print " -" + str(args.reffilename) + "..."
-	U_ref = Universe(args.reffilename)
-	print " -" + str(args.grofilename) + "..."
-	U_gro = Universe(args.grofilename)
-	return
-def identify_leaflets_ref():
+def set_lipids_beads():
 
-	global upper_ref
-	global lower_ref
-	
-	print "\nProcessing reference file..."	
-	#use LeafletFinder:
-	if args.cutoff_leaflet != 'large':
-		if args.cutoff_leaflet == 'optimise':
-			print " -optimising cutoff..."
-			tmp_cutoff_value = MDAnalysis.analysis.leaflet.optimize_cutoff(U_ref, "name " + str(args.beadname))
-			print " -identifying leaflets..."
-			L_ref = MDAnalysis.analysis.leaflet.LeafletFinder(U_ref, "name " + str(args.beadname), tmp_cutoff_value[0])
-		else:
-			print " -identifying leaflets..."
-			L_ref = MDAnalysis.analysis.leaflet.LeafletFinder(U_ref, "name " + str(args.beadname), args.cutoff_leaflet)
-		if np.shape(L_ref.groups())[0]<2:
-			print "Error: imposssible to identify 2 leaflets."
-			sys.exit(1)
-		else:
-			if L_ref.group(0).centerOfGeometry()[2] > L_ref.group(1).centerOfGeometry()[2]:
-				upper_ref = L_ref.group(0)
-				lower_ref = L_ref.group(1)
-			else:
-				upper_ref = L_ref.group(1)
-				lower_ref = L_ref.group(0)
+	global leaflet_sele_string
 
-	#use cog 
-	else:
-		print " -identifying leaflets..."
-		tmp_leaflets = U_ref.selectAtoms("name " + str(args.beadname))
-		tmp_lipids_avg_z = tmp_leaflets.centerOfGeometry()[2]
-		upper_ref = tmp_leaflets.selectAtoms("prop z > " + str(tmp_lipids_avg_z))
-		lower_ref = tmp_leaflets.selectAtoms("prop z < " + str(tmp_lipids_avg_z))
-	
-	#display results	
-	print " -found 2 leaflets: ", upper_ref.numberOfResidues(), "(upper) and ", lower_ref.numberOfResidues(), "(lower) lipids"
+	#set default beads
+	leaflet_sele_string = "name " + str(args.beadname)
 
 	return
-def identify_leaflets_gro():
+def load_MDA_universe():
 	
-	global upper_gro
-	global lower_gro
+	global U
+	global all_atoms
+	global nb_atoms
+	global nb_frames_xtc
+	global frames_to_process
+	global frames_to_write
+	global nb_frames_to_process
+	global f_start
+	global f_end	
+	f_start = 0
+	
+	print "\nLoading trajectory..."
+	U = Universe(args.grofilename, args.xtcfilename)
+	U_timestep = U.trajectory.dt
+	all_atoms = U.selectAtoms("all")
+	nb_atoms = all_atoms.numberOfAtoms()
+	nb_frames_xtc = U.trajectory.numframes		
+	#sanity check
+	if U.trajectory[nb_frames_xtc-1].time/float(1000) < args.t_start:
+		print "Error: the trajectory duration (" + str(U.trajectory.time/float(1000)) + "ns) is shorted than the starting stime specified (" + str(args.t_start) + "ns)."
+		sys.exit(1)
+	if U.trajectory.numframes < args.frames_dt:
+		print "Warning: the trajectory contains fewer frames (" + str(nb_frames_xtc) + ") than the frame step specified (" + str(args.frames_dt) + ")."
 
-	print "\nProcessing second file..."
-	#use LeafletFinder:
-	if args.cutoff_leaflet != 'large':
-		if args.cutoff_leaflet == 'optimise':
-			print " -optimising cutoff..."
-			tmp_cutoff_value = MDAnalysis.analysis.leaflet.optimize_cutoff(U_gro, "name " + str(args.beadname))
-			print " -identifying leaflets..."
-			L_gro = MDAnalysis.analysis.leaflet.LeafletFinder(U_gro, "name " + str(args.beadname), tmp_cutoff_value[0])
-		else:
-			print " -identifying leaflets..."
-			L_gro = MDAnalysis.analysis.leaflet.LeafletFinder(U_gro, "name " + str(args.beadname), args.cutoff_leaflet)
-		if np.shape(L_gro.groups())[0]<2:
-			print "Error: imposssible to identify 2 leaflets."
+	#rewind traj (very important to make sure that later the 1st frame of the xtc will be used for leaflet identification)
+	U.trajectory.rewind()
+	
+	#create list of index of frames to process
+	if args.t_end != -1:
+		f_end = int((args.t_end*1000 - U.trajectory[0].time) / float(U_timestep))
+		if f_end < 0:
+			print "Error: the starting time specified is before the beginning of the xtc."
 			sys.exit(1)
-		else:
-			if L_gro.group(0).centerOfGeometry()[2] > L_gro.group(1).centerOfGeometry()[2]:
-				upper_gro = L_gro.group(0)
-				lower_gro = L_gro.group(1)
-			else:
-				upper_gro = L_gro.group(1)
-				lower_gro = L_gro.group(0)
-
-	#use cog 
 	else:
-		print " -identifying leaflets..."
-		tmp_leaflets = U_gro.selectAtoms("name " + str(args.beadname))
-		tmp_lipids_avg_z = tmp_leaflets.centerOfGeometry()[2]
-		upper_gro = tmp_leaflets.selectAtoms("prop z > " + str(tmp_lipids_avg_z))
-		lower_gro = tmp_leaflets.selectAtoms("prop z < " + str(tmp_lipids_avg_z))
-
-
-	#display results	
-	print " -found 2 leaflets: " + upper_gro.numberOfResidues() + "(upper) and " + lower_gro.numberOfResidues() + "(lower) lipids"
-	
+		f_end = nb_frames_xtc - 1		
+	if args.t_start != -1:
+		f_start = int((args.t_start*1000 - U.trajectory[0].time) / float(U_timestep))
+		if f_start > f_end:
+			print "Error: the starting time specified is after the end of the xtc."
+			sys.exit(1)
+	if (f_end - f_start)%args.frames_dt == 0:
+		tmp_offset = 0
+	else:
+		tmp_offset = 1
+	frames_to_process = map(lambda f:f_start + args.frames_dt*f, range(0,(f_end - f_start)//args.frames_dt+tmp_offset))
+	nb_frames_to_process = len(frames_to_process)
+			
 	return
 def identify_ff():
-
-	global nb_ff
+	print "\nReading selection file for flipflopping lipids..."
 	
-	print "\nIdentifying flip-flopping lipids..."
-	
-	#method 1: compare leaflets
-	#--------------------------
-	if args.neighbours == "no":
+	#declare variables
+	global lipids_ff_nb
+	global lipids_ff_info
+	global lipids_ff_resnames
+	global lipids_ff_leaflet
+	global lipids_ff_u2l_index
+	global lipids_ff_l2u_index
+	global lipids_sele_ff
+	global lipids_sele_ff_bead
+	global lipids_sele_ff_bonds
+	global lipids_sele_ff_VMD_string
+	global leaflet_sele_string
+	lipids_ff_nb = 0
+	lipids_ff_info = {}
+	lipids_ff_resnames = []
+	lipids_ff_leaflet = []
+	lipids_ff_u2l_index = []
+	lipids_ff_l2u_index = []
+	lipids_sele_ff = {}
+	lipids_sele_ff_bead = {}
+	lipids_sele_ff_bonds = {}
+	lipids_sele_ff_VMD_string={}
 		
-		##compare contents
-		#upref_to_lwgro = np.setdiff1d(upper_ref.resnums(),upper_gro.resnums())		#lipids in upper_ref NOT in upper_gro
-		#lwref_to_upgro = np.setdiff1d(lower_ref.resnums(),lower_gro.resnums())		#lipids in lower_ref NOT in lower_gro
-		#upgro_to_lwref = np.setdiff1d(upper_gro.resnums(),upper_ref.resnums())		#lipids in upper_gro NOT in upper_ref
-		#lwgro_to_upref = np.setdiff1d(lower_gro.resnums(),lower_ref.resnums())		#lipids in lower_gro NOT in lower_ref
+	with open(args.selection_file_ff) as f:
+		lines = f.readlines()
+	lipids_ff_nb = len(lines)
+	print " -found " + str(lipids_ff_nb) + " flipflopping lipids"
+	leaflet_sele_string = leaflet_sele_string + " and not ("
+	for l_index in range(0,lipids_ff_nb):
+		line = lines[l_index]
+		if line[-1] == "\n":
+			line = line[:-1]
+		try:
+			line_content = line.split(',')
+			if len(line_content) != 4:
+				print "Error: wrong format for line " + str(l_index+1) + " in " + str(args.selection_file_ff) + ", see note 4 in bilayer_perturbations --help."
+				print " ->", line
+				sys.exit(1)
+			#read current lipid details
+			lip_resname = line_content[0]
+			lip_resnum = int(line_content[1])
+			lip_leaflet = line_content[2]
+			lip_bead = line_content[3]
+			lipids_ff_info[l_index] = [lip_resname,lip_resnum,lip_leaflet,lip_bead]
+						
+			#update: starting leaflets
+			if lip_leaflet not in lipids_ff_leaflet:
+				lipids_ff_leaflet.append(lip_leaflet)
 
-		##build lists
-		#for r in upref_to_lwgro:										#lipids in upper1 NOT in upper2
-			#tmp = U_ref.selectAtoms("resid " + str(r))
-			#if tmp.resnames()[0] in ff_uref_to_lgro.keys():
-				#ff_uref_to_lgro[tmp.resnames()[0]].append(r)
-			#else:
-				#ff_uref_to_lgro[tmp.resnames()[0]]=[]
-				#ff_uref_to_lgro[tmp.resnames()[0]].append(r)
-		#for r in lwref_to_upgro:										#lipids in lower1 NOT in lower2
-			#tmp = U_ref.selectAtoms("resid " + str(r))
-			#if tmp.resnames()[0] in ff_lref_to_ugro.keys():
-				#ff_lref_to_ugro[tmp.resnames()[0]].append(r)
-			#else:
-				#ff_lref_to_ugro[tmp.resnames()[0]]=[]
-				#ff_lref_to_ugro[tmp.resnames()[0]].append(r)
-		#for r in upgro_to_lwref:										#lipids in upper2 NOT in upper1
-			#tmp=U_ref.selectAtoms("resid " + str(r))
-			#if tmp.resnames()[0] in ff_ugro_to_lref.keys():
-				#ff_ugro_to_lref[tmp.resnames()[0]].append(r)
-			#else:
-				#ff_ugro_to_lref[tmp.resnames()[0]]=[]
-				#ff_ugro_to_lref[tmp.resnames()[0]].append(r)
-		#for r in lwgro_to_upref:										#lipids in lower2 NOT in lower1
-			#tmp=U_ref.selectAtoms("resid " + str(r))
-			#if tmp.resnames()[0] in ff_lgro_to_uref.keys():
-				#ff_lgro_to_uref[tmp.resnames()[0]].append(r)
-			#else:
-				#ff_lgro_to_uref[tmp.resnames()[0]]=[]
-				#ff_lgro_to_uref[tmp.resnames()[0]].append(r)	
-		print "TO DO"
+			#update: index in directional lists
+			if lip_leaflet == "upper":
+				lipids_ff_u2l_index.append(l_index)
+			elif lip_leaflet == "lower":
+				lipids_ff_l2u_index.append(l_index)
+			else:
+				print "->unknown starting leaflet '" + str(lip_leaflet) + "'."
+				sys.exit(1)
+			
+			#update: resnames
+			if lip_resname not in lipids_ff_resnames:
+				lipids_ff_resnames.append(lip_resname)
+	
+			#update: leaflet selection string
+			if l_index==0:
+				leaflet_sele_string+="(resname " + str(lip_resname) + " and resnum " + str(lip_resnum) + ")"
+			else:
+				leaflet_sele_string+=" or (resname " + str(lip_resname) + " and resnum " + str(lip_resnum) + ")"
 
-	#method 2: compare neighbours
-	#----------------------------
+			#create selections
+			lipids_sele_ff[l_index] = U.selectAtoms("resname " + str(lip_resname) + " and resnum " + str(lip_resnum))
+			lipids_sele_ff_bead[l_index] = lipids_sele_ff[l_index].selectAtoms("name " + str(lip_bead))
+			lipids_sele_ff_VMD_string[l_index]="resname " + str(lipids_ff_info[l_index][0]) + " and resid " + str(lipids_ff_info[l_index][1])
+			if lipids_sele_ff[l_index].numberOfAtoms() == 0:
+				print "Error:"
+				print line
+				print "-> no such lipid found."
+				sys.exit(1)	
+		except:
+			print "Error: invalid flipflopping lipid selection string on line " + str(l_index+1) + ": '" + line + "'"
+			sys.exit(1)
+	leaflet_sele_string+=")"		
+
+	return
+def identify_leaflets():
+	print "\nIdentifying leaflets..."
+	
+	#declare variables
+	global U_lip
+	global leaflet_sele
+	global leaflet_sele_atoms
+	global upper_resnums
+	global lower_resnums
+	leaflet_sele = {}
+	leaflet_sele_atoms = {}
+	for l in ["lower","upper","both"]:
+		leaflet_sele[l] = {}
+		leaflet_sele_atoms[l] = {}
+	
+	#check the leaflet selection string is valid
+	U_lip = U.selectAtoms(leaflet_sele_string)
+	if U_lip.numberOfAtoms() == 0:
+		print "Error: invalid selection string '" + str(leaflet_sele_string) + "'"
+		print "-> no particles selected."
+		sys.exit(1)
+
+	#use LeafletFinder:
+	if args.cutoff_leaflet != 'large':
+		if args.cutoff_leaflet == 'optimise':
+			print " -optimising cutoff..."
+			cutoff_value = MDAnalysis.analysis.leaflet.optimize_cutoff(U, leaflet_sele_string)
+			L = MDAnalysis.analysis.leaflet.LeafletFinder(U, leaflet_sele_string, cutoff_value[0])
+		else:
+			L = MDAnalysis.analysis.leaflet.LeafletFinder(U, leaflet_sele_string, args.cutoff_leaflet)
+	
+		if np.shape(L.groups())[0]<2:
+			print "Error: imposssible to identify 2 leaflets."
+			sys.exit(1)
+		if L.group(0).centerOfGeometry()[2] > L.group(1).centerOfGeometry()[2]:
+			leaflet_sele["upper"] = L.group(0)
+			leaflet_sele["lower"] = L.group(1)
+		else:
+			leaflet_sele["upper"] = L.group(1)
+			leaflet_sele["lower"] = L.group(0)
+		leaflet_sele["both"] = leaflet_sele["lower"] + leaflet_sele["upper"]
+		if np.shape(L.groups())[0] == 2:
+			print " -found 2 leaflets: ", leaflet_sele["upper"].numberOfResidues(), '(upper) and ', leaflet_sele["lower"].numberOfResidues(), '(lower) lipids'
+		else:
+			other_lipids=0
+			for g in range(2, np.shape(L.groups())[0]):
+				other_lipids += L.group(g).numberOfResidues()
+			print " -found " + str(np.shape(L.groups())[0]) + " groups: " + str(leaflet_sele["upper"].numberOfResidues()) + "(upper), " + str(leaflet_sele["lower"].numberOfResidues()) + "(lower) and " + str(other_lipids) + " (others) lipids respectively"
+	#use cog:
 	else:
-		tmp_upper_neighbours = {}
-		tmp_lower_neighbours = {}
-		tmp_upper_nb = upper_ref.numberOfResidues()
-		tmp_lower_nb = lower_ref.numberOfResidues()
-		tmp_upper_resnums = upper_ref.resnums()
-		tmp_lower_resnums = lower_ref.resnums()
-		tmp_U_gro_lip = U_gro.selectAtoms("name " + str(args.beadname))
-		
-		for a_index in range(0,tmp_upper_nb):
-			#display progress
-			progress = '\r -upper leaflet: processing lipid ' + str(a_index+1) + '/' + str(tmp_upper_nb) + '        '
-			sys.stdout.flush()
-			sys.stdout.write(progress)
-			
-			#check whether more than half of the neighbours belong to the lower leaflet
-			tmp_a = upper_ref[a_index]
-			tmp_neighbours = tmp_U_gro_lip.selectAtoms("around " + str(args.neighbours) + " resid " + str(tmp_a.resid)).resnums()
-			tmp_neighbours = np.in1d(tmp_neighbours, tmp_lower_resnums)
-			if len(tmp_neighbours) == 0:
-				print ""
-				print "  Warning: no lipid neighbours within", str(args.neighbours), "of bead", str(args.beadname), "of", str(tmp_a.resname), str(tmp_a.resid) 
-			else:
-				tmp_upper_neighbours[a_index] =  len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
-				if tmp_upper_neighbours[a_index] > 0.5:
-					upper_to_lower[tmp_a.resnum] = tmp_a.resname
-		print ''
-	
-		for a_index in range(0,tmp_lower_nb):
-			#display progress
-			progress = '\r -lower leaflet: processing lipid ' + str(a_index+1) + '/' + str(tmp_lower_nb) + '        '
-			sys.stdout.flush()
-			sys.stdout.write(progress)
-			
-			#check whether more than half of the neighbours belong to the lower leaflet
-			tmp_a = lower_ref[a_index]
-			tmp_neighbours = tmp_U_gro_lip.selectAtoms("around " + str(args.neighbours) + " resid " + str(tmp_a.resid)).resnums()
-			tmp_neighbours = np.in1d(tmp_neighbours, tmp_upper_resnums)
-			if len(tmp_neighbours) == 0:
-				print ""
-				print "  Warning: no lipid neighbours within ", str(args.neighbours), "of bead ", str(args.beadname), "of ", str(tmp_a.resname), str(tmp_a.resid) 
-				print ""
-			else:
-				tmp_lower_neighbours[a_index] =  len(tmp_neighbours[tmp_neighbours==True]) / float(len(tmp_neighbours))
-				if tmp_lower_neighbours[a_index] > 0.5:				
-					lower_to_upper[tmp_a.resnum] = tmp_a.resname
-		print ''
-		
-		#count nb of flip-flopping lipids
-		nb_ff = len(upper_to_lower.keys()) + len(lower_to_upper.keys())
+		leaflet_sele["both"] = U.selectAtoms(leaflet_sele_string)
+		tmp_lipids_avg_z = leaflet_sele["both"].centerOfGeometry()[2]
+		leaflet_sele["upper"] = leaflet_sele["both"].selectAtoms("prop z > " + str(tmp_lipids_avg_z))
+		leaflet_sele["lower"] = leaflet_sele["both"].selectAtoms("prop z < " + str(tmp_lipids_avg_z))
+		print " -found 2 leaflets: ", leaflet_sele["upper"].numberOfResidues(), '(upper) and ', leaflet_sele["lower"].numberOfResidues(), '(lower) lipids'
+
+	#store resnums (avoid repetitive access)
+	upper_resnums =leaflet_sele["upper"].resnums()
+	lower_resnums =leaflet_sele["lower"].resnums()
 		
 	return
 
-def write_selection_file():
-	
-	print "\nWriting selection files..."
-	
-	#text format
-	#-----------
-	#open file
-	output_sele = open(os.getcwd() + '/' + args.output_folder + '/flipflop.sele', 'w')
-	#upper to lower
-	for r_num in upper_to_lower.keys():
-		output_sele.write(str(upper_to_lower[r_num]) + "," + str(r_num) + ",upper," + str(args.beadname) + "\n")
-	#lower to upper
-	for r_num in lower_to_upper.keys():
-		output_sele.write(str(lower_to_upper[r_num]) + "," + str(r_num) + ",lower," + str(args.beadname) + "\n")
-	output_sele.close()
-	
-	#vmd and pml format
-	#------------------
-	if len(upper_to_lower.keys()) > 0:
-		#create writers instances
-		leaflet_writer_vmd = MDAnalysis.selections.vmd.SelectionWriter(args.output_folder + "/upper")
-		leaflet_writer_pml = MDAnalysis.selections.pymol.SelectionWriter(args.output_folder + "/upper")
-		ff_writer_vmd = MDAnalysis.selections.vmd.SelectionWriter(args.output_folder + "/ff_upper_to_lower")
-		ff_writer_pml = MDAnalysis.selections.pymol.SelectionWriter(args.output_folder + "/ff_upper_to_lower")
+#=========================================================================================
+# core functions
+#=========================================================================================
 
-		#create selection string
-		for r_index in range(0,len(upper_to_lower.keys())):
-			r_num = upper_to_lower.keys()[r_index]
-			if r_index == 0:
-				tmp_ff_u2l_string = "(resname " + str(upper_to_lower[r_num]) + " and resnum " + str(r_num) + ")"
-			else:
-				tmp_ff_u2l_string += " or (resname " + str(upper_to_lower[r_num]) + " and resnum " + str(r_num) + ")"
-		
-		#create selections
-		upper_clean = upper_ref.selectAtoms(" not (" + str(tmp_ff_u2l_string) + ")")
-		tmp_u2l = U_ref.selectAtoms(str(tmp_ff_u2l_string))
-		
-		#write selections
-		leaflet_writer_vmd.write(upper_clean, name = "upper")
-		leaflet_writer_pml.write(upper_clean, name = "upper")
-		ff_writer_vmd.write(tmp_u2l, name = "ff_u2l")
-		ff_writer_pml.write(tmp_u2l, name = "ff_u2l")
-	else:
-		leaflet_writer_vmd = MDAnalysis.selections.vmd.SelectionWriter(args.output_folder + "/upper")
-		leaflet_writer_pml = MDAnalysis.selections.pymol.SelectionWriter(args.output_folder + "/upper")
-		leaflet_writer_vmd.write(upper_ref, name = "upper")
-		leaflet_writer_pml.write(upper_ref, name = "upper")
-			
-	if len(lower_to_upper.keys()) > 0:
-		#create writers instances
-		leaflet_writer_vmd = MDAnalysis.selections.vmd.SelectionWriter(args.output_folder + "/lower")
-		leaflet_writer_pml = MDAnalysis.selections.pymol.SelectionWriter(args.output_folder + "/lower")
-		ff_writer_vmd = MDAnalysis.selections.vmd.SelectionWriter(args.output_folder + "/ff_lower_to_upper")
-		ff_writer_pml = MDAnalysis.selections.pymol.SelectionWriter(args.output_folder + "/ff_lower_to_upper")
-		
-		#create selection string
-		for r_index in range(0,len(lower_to_upper.keys())):
-			r_num = lower_to_upper.keys()[r_index]
-			if r_index == 0:
-				tmp_ff_l2u_string = "(resname " + str(lower_to_upper[r_num]) + " and resnum " + str(r_num) + ")"
-			else:
-				tmp_ff_l2u_string += " or (resname " + str(lower_to_upper[r_num]) + " and resnum " + str(r_num) + ")"
-		
-		#create selections
-		lower_clean = lower_ref.selectAtoms(" not (" + str(tmp_ff_l2u_string) + ")")
-		tmp_l2u = U_ref.selectAtoms(str(tmp_ff_l2u_string))
-		
-		#write selections
-		leaflet_writer_vmd.write(lower_clean, name = "lower")
-		leaflet_writer_pml.write(lower_clean, name = "lower")
-		ff_writer_vmd.write(tmp_l2u, name = "ff_l2u")
-		ff_writer_pml.write(tmp_l2u, name = "ff_l2u")
-	else:
-		leaflet_writer_vmd = MDAnalysis.selections.vmd.SelectionWriter(args.output_folder + "/lower")
-		leaflet_writer_pml = MDAnalysis.selections.pymol.SelectionWriter(args.output_folder + "/lower")
-		leaflet_writer_vmd.write(lower_ref, name = "lower")
-		leaflet_writer_pml.write(lower_ref, name = "lower")
+def check_ff(f_nb, t):
+	
+	global ff_times
+	global ff_nb_u2l
+	global ff_nb_l2u
+	
+	#upper to lower
+	if f_nb > 0:
+		ff_nb_u2l[f_nb] = ff_nb_u2l[f_nb-1]
+	for l_index in lipids_ff_u2l_index:
+		if ff_times[l_index] == 0:
+			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index]p1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
+			tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)
+			if len(tmp_neighbours)> 0:
+				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
+				if tmp_ratio > 0.5:
+					ff_times[l_index] = t/float(1000)
+					ff_nb_u2l[f_nb] += 1
+	
+	#lower to upper
+	if f_nb > 0:
+		ff_nb_l2u[f_nb] = ff_nb_l2u[f_nb-1]
+	for l_index in lipids_ff_l2u_index:
+		if ff_times[l_index] == 0:
+			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index]p1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
+			tmp_neighbours = np.in1d(tmp_neighbours, upper_resnums)
+			if len(tmp_neighbours)> 0:
+				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
+				if tmp_ratio > 0.5:
+					ff_times[l_index] = t/float(1000)
+					ff_nb_l2u[f_nb] += 1
+	return
+
+#=========================================================================================
+# outputs
+#=========================================================================================
+
+def write_xvg_times():
+	
+	print " -writing flip-flopping times..."	
+	filename_txt = os.getcwd() + '/' + str(args.output_folder) + '/ff_times.txt'
+	output_txt = open(filename_txt, 'w')
+	output_txt.write("[times of lipid flip-flops - written by ff_times v" + str(version_nb) + "]\n")
+	#upper to lower
+	output_txt.write("")
+	output_txt.write("upper to lower\n")
+	output_txt.write("--------------\n")
+	for l_index in lipids_ff_u2l_index:
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
+	
+	#lower to upper
+	output_txt.write("")
+	output_txt.write("lower to upper\n")
+	output_txt.write("--------------\n")
+	for l_index in lipids_ff_l2u_index:
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
+	output_txt.close()
+	return
+
+def write_xvg_evolution():
+	
+	print " -writing evolution of number of flip-flops..."	
+	filename_xvg = os.getcwd() + '/' + str(args.output_folder) + '/ff_evolution.xvg'
+	output_xvg = open(filename_xvg, 'w')
+	output_xvg.write("@ title \"Evolution of number of flip-flops\"\n")
+	output_xvg.write("@ xaxis  label \"time (ns)\"\n")
+	output_xvg.write("@ yaxis  label \"number of flip-flops\"\n")
+	output_xvg.write("@ autoscale ONREAD xaxes\n")
+	output_xvg.write("@ TYPE XY\n")
+	output_xvg.write("@ view 0.15, 0.15, 0.95, 0.85\n")
+	output_xvg.write("@ legend on\n")
+	output_xvg.write("@ legend box on\n")
+	output_xvg.write("@ legend loctype view\n")
+	output_xvg.write("@ legend 0.98, 0.8\n")
+	output_xvg.write("@ legend length 2\n")
+	output_xvg.write("@ s0 legend \"upper to lower\"\n")
+	output_xvg.write("@ s1 legend \"lower to upper\"\n")
+	for f_index in range(0,nb_frames_to_process):
+		results = str(frames_time[f_index]) + "	" + str(ff_nb_u2l[f_index]) + "	" + str(ff_nb_l2u[f_index])
+		output_xvg.write(results + "\n")
+	output_xvg.close()
 
 	return
 
@@ -519,16 +540,37 @@ def write_selection_file():
 # ALGORITHM
 ################################################################################################################################################
 
-data_loading()
-identify_leaflets_ref()
-if args.neighbours == "no":
-	identify_leaflets_gro()
+#load ata
+set_lipids_beads()
+load_MDA_universe()
 identify_ff()
-if nb_ff > 0:
-	write_selection_file()
-	print "\nFinished successfully!", str(nb_ff), "flip-flops detected, check results in", str(args.output_folder)
-else:
-	print "\nFinished successfully! 0 flip-flops detected."
+identify_leaflets()
+
+#create data structures
+global ff_times
+global ff_nb_u2l
+global ff_nb_l2u
+global frames_time
+ff_times = np.zeros(ff_lipids_nb)
+ff_nb_u2l = np.zeros(nb_frames_to_process)
+ff_nb_l2u = np.zeros(nb_frames_to_process)
+frames_time = np.zeros(nb_frames_to_process)
+
+#browse trajectory
+for f_index in range(0,nb_frames_to_process):
+	ts = U.trajectory[frames_to_process[f_index]]
+	progress = '\r -processing frame ' + str(f_index+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' frame(s) from frame ' + str(f_start) + ' to frame ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ')      '  
+	sys.stdout.flush()
+	sys.stdout.write(progress)
+		
+	frames_time[f_index] = f_time
+	check_ff(f_index, ts.time)
+
+#create outputs
+print "\nWriting results files..."
+write_xvg_times()
+write_xvg_evolution()
 
 #exit
+print "\nFinished successfully!" "Check results in", str(args.output_folder)
 sys.exit(0)
