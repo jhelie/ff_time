@@ -224,7 +224,7 @@ if args.cutoff_leaflet != "large" and args.cutoff_leaflet != "optimise":
 # create folders and log file
 #=========================================================================================
 if args.output_folder=="no":
-	args.output_folder="ff_time_" + args.grofilename[:-4] + '_' + args.xtcfilename[:-4]
+	args.output_folder="ff_times_" + args.xtcfilename[:-4]
 if os.path.isdir(args.output_folder):
 	print "Error: folder " + str(args.output_folder) + " already exists, choose a different output name via -o."
 	sys.exit(1)
