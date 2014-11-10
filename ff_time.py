@@ -472,12 +472,12 @@ def check_ff(f_nb, t):
 		ff_nb_u2l[f_nb] = ff_nb_u2l[f_nb-1]
 	for l_index in lipids_ff_u2l_index:
 		if ff_times[l_index] == 0:
-			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
+			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
 			tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)
 			if len(tmp_neighbours)> 0:
 				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
 				if tmp_ratio > 0.5:
-					ff_times[l_index] = t/float(1000)
+					ff_times[l_index] = t
 					ff_nb_u2l[f_nb] += 1
 	
 	#lower to upper
@@ -485,13 +485,14 @@ def check_ff(f_nb, t):
 		ff_nb_l2u[f_nb] = ff_nb_l2u[f_nb-1]
 	for l_index in lipids_ff_l2u_index:
 		if ff_times[l_index] == 0:
-			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0])).resnums()
+			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
 			tmp_neighbours = np.in1d(tmp_neighbours, upper_resnums)
-			if len(tmp_neighbours)> 0:
+			if len(tmp_neighbours) > 0:
 				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
 				if tmp_ratio > 0.5:
-					ff_times[l_index] = t/float(1000)
+					ff_times[l_index] = t
 					ff_nb_l2u[f_nb] += 1
+
 	return
 
 #=========================================================================================
@@ -512,7 +513,7 @@ def write_xvg_times():
 		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
 	
 	#lower to upper
-	output_txt.write("")
+	output_txt.write("\n")
 	output_txt.write("lower to upper\n")
 	output_txt.write("--------------\n")
 	for l_index in lipids_ff_l2u_index:
@@ -560,23 +561,24 @@ global ff_times
 global ff_nb_u2l
 global ff_nb_l2u
 global frames_time
-ff_times = np.zeros(ff_lipids_nb)
+ff_times = np.zeros(lipids_ff_nb)
 ff_nb_u2l = np.zeros(nb_frames_to_process)
 ff_nb_l2u = np.zeros(nb_frames_to_process)
 frames_time = np.zeros(nb_frames_to_process)
 
 #browse trajectory
+print "\nChecking for flip-flopping status..."
 for f_index in range(0,nb_frames_to_process):
 	ts = U.trajectory[frames_to_process[f_index]]
 	progress = '\r -processing frame ' + str(f_index+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' frame(s) from frame ' + str(f_start) + ' to frame ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ')      '  
 	sys.stdout.flush()
 	sys.stdout.write(progress)
 		
-	frames_time[f_index] = f_time
-	check_ff(f_index, ts.time)
+	frames_time[f_index] = ts.time/float(1000)
+	check_ff(f_index, ts.time/float(1000))
 
 #create outputs
-print "\nWriting results files..."
+print "\n\nWriting results files..."
 write_xvg_times()
 write_xvg_evolution()
 
