@@ -26,6 +26,17 @@ git: https://github.com/jhelie/ff_time
 This script estimates when the flipflopping lipids identited by ff_detect actually
 flip-flops.
 	
+A file listing the flip-flopping lipids must be supplied with the --flipflops option.
+Each line of this file should follow the format (time in ns):
+
+ -> 'resname,resid,starting_leaflet,z_bead'
+
+where starting_leaflet is either 'upper' or 'lower' - e.g. 'POPC,145,lower,PO4'. The
+'z_bead' particle is used to track the position of the lipid. The script will then
+produce an updated file with the following format:
+
+ -> 'resname,resid,starting_leaflet,z_bead,t_start,t_end'
+
 [ REQUIREMENTS ]
 
 The following python modules are needed :
