@@ -510,7 +510,7 @@ def calculate_cog(tmp_coords, box_dim):
 	#this method allows to take pbc into account when calculcating the center of geometry 
 	#see: http://en.wikipedia.org/wiki/Center_of_mass#Systems_with_periodic_boundary_conditions
 		
-	cog_coord = np.zeros(3)
+	cog_coord = np.zeros((1,3))
 	tmp_nb_atoms = np.shape(tmp_coords)[0]
 	
 	for n in range(0,3):
@@ -518,10 +518,11 @@ def calculate_cog(tmp_coords, box_dim):
 		xsi = np.cos(tet)
 		zet = np.sin(tet)
 		tet_avg = math.atan2(-np.average(zet),-np.average(xsi)) + math.pi
-		cog_coord[n] = tet_avg * box_dim[n] / float(2*math.pi)
+		cog_coord[0,n] = tet_avg * box_dim[n] / float(2*math.pi)
 	
-	return cog_coord
-
+	
+	
+	return np.float32(cog_coord)
 def check_ff(f_nb, t, box_dim):
 	
 	global ff_t_mid, ff_t_start, ff_t_mid
@@ -542,7 +543,7 @@ def check_ff(f_nb, t, box_dim):
 
 		#display update
 		ff_counter += 1
-		progress = '\r -processing frame ' + str(f_nb+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' from frame ' + str(f_start) + ' to ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + '), flip-flopping lipid ' + str(ff_counter) + '/' + str(lipids_ff_nb) + '         '
+		progress = '\r -processing frame ' + str(f_nb+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' from ' + str(f_start) + ' to ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ') and flip-flopping lipid ' + str(ff_counter) + '/' + str(lipids_ff_nb) + '   '
 		sys.stdout.flush()
 		sys.stdout.write(progress)
 
@@ -566,8 +567,8 @@ def check_ff(f_nb, t, box_dim):
 			upper_neighbours = upper_tmp.selectAtoms("around " + str(cutoff_upper) + " (resname " + str(lipids_ff_info[l_index][0]) + " and resid " + str(lipids_ff_info[l_index][1]) + ")")
 
 			#calculate center of geometry of n closest neighbours in each leaflet
-			lower_cog = calculate_cog(lower_neighbours.coordinates(), box_dim)
-			upper_cog = calculate_cog(upper_neighbours.coordinates(), box_dim)
+			lower_cog = np.float32(calculate_cog(lower_neighbours.coordinates(), box_dim))
+			upper_cog = np.float32(calculate_cog(upper_neighbours.coordinates(), box_dim))
 	
 			#calculate distance between current lipid and each center of geo
 			d_lower_geo = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, lower_cog, box_dim)
@@ -584,7 +585,7 @@ def check_ff(f_nb, t, box_dim):
 		
 			#check for end of flip_lfop
 			if d_lower_geo < args.ngh_frac * d_inter_geo:
-				ff_t_start[l_index] = t
+				ff_t_end[l_index] = t
 
 			#check mid-point time criteria
 			if ff_t_mid[l_index] == 0:
@@ -612,7 +613,7 @@ def check_ff(f_nb, t, box_dim):
 
 		#display update
 		ff_counter += 1
-		progress = '\r -processing frame ' + str(f_nb+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' from frame ' + str(f_start) + ' to ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + '), flip-flopping lipid ' + str(ff_counter) + '/' + str(lipids_ff_nb) + '         '
+		progress = '\r -processing frame ' + str(f_nb+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' from ' + str(f_start) + ' to ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ') and flip-flopping lipid ' + str(ff_counter) + '/' + str(lipids_ff_nb) + '   '
 		sys.stdout.flush()
 		sys.stdout.write(progress)
 
@@ -654,7 +655,7 @@ def check_ff(f_nb, t, box_dim):
 		
 			#check for end of flip_lfop
 			if d_upper_geo < args.ngh_frac * d_inter_geo:
-				ff_t_start[l_index] = t
+				ff_t_end[l_index] = t
 
 			#check mid-point time criteria
 			if ff_t_mid[l_index] == 0:
@@ -678,7 +679,7 @@ def check_ff(f_nb, t, box_dim):
 def write_sele_update():
 	
 	print " -updating selection file '" + str(args.selection_file_ff) + "'..."	
-	filename_txt = os.getcwd() + '/' + str(args.output_folder) + '/' + str(args.selection_file_ff[:-5]) + '.sele'
+	filename_txt = os.getcwd() + '/' + str(args.output_folder) + '/' + str(args.selection_file_ff[:-5]) + '_update.sele'
 	output_txt = open(filename_txt, 'w')
 	#upper to lower
 	for l_index in lipids_ff_u2l_index:
@@ -689,7 +690,6 @@ def write_sele_update():
 		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(lipids_ff_info[l_index][2]) + "," + str(lipids_ff_info[l_index][3]) + "," + str(ff_t_start[l_index]) + "," + str(ff_t_end[l_index]) + "\n")
 	output_txt.close()
 	return
-
 def write_txt_times():
 	
 	print " -writing flip-flopping times..."	
@@ -764,10 +764,6 @@ frames_time = np.zeros(nb_frames_to_process)
 print "\nChecking for flip-flopping status..."
 for f_index in range(0,nb_frames_to_process):
 	ts = U.trajectory[frames_to_process[f_index]]
-	#progress = '\r -processing frame ' + str(f_index+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' frame(s) from frame ' + str(f_start) + ' to frame ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ')      '  
-	#sys.stdout.flush()
-	#sys.stdout.write(progress)
-		
 	frames_time[f_index] = ts.time/float(1000)
 	tmp_upper_coord = leaflet_sele["upper"].coordinates()
 	tmp_lower_coord = leaflet_sele["lower"].coordinates()
@@ -775,7 +771,7 @@ for f_index in range(0,nb_frames_to_process):
 
 #create outputs
 print "\n\nWriting results files..."
-write_update_sele()
+write_sele_update()
 write_txt_times()
 write_xvg_evolution()
 
