@@ -699,18 +699,12 @@ def write_txt_times():
 	output_txt = open(filename_txt, 'w')
 	output_txt.write("[times of lipid flip-flops - written by ff_times v" + str(version_nb) + "]\n")
 	#upper to lower
-	output_txt.write("")
-	output_txt.write("upper to lower\n")
-	output_txt.write("--------------\n")
 	for l_index in lipids_ff_u2l_index:
-		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_t_mid[l_index]) + "," + str(ff_t_end[l_index] - ff_t_start[l_index]) + "\n")
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(lipids_ff_info[l_index][2]) + "," + str(ff_t_mid[l_index]) + "," + str(ff_t_end[l_index] - ff_t_start[l_index]) + "\n")
 	
 	#lower to upper
-	output_txt.write("\n")
-	output_txt.write("lower to upper\n")
-	output_txt.write("--------------\n")
 	for l_index in lipids_ff_l2u_index:
-		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_t_mid[l_index]) + "," + str(ff_t_end[l_index] - ff_t_start[l_index]) + "\n")
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(lipids_ff_info[l_index][2]) + "," + str(ff_t_mid[l_index]) + "," + str(ff_t_end[l_index] - ff_t_start[l_index]) + "\n")
 	output_txt.close()
 	return
 def write_xvg_evolution():
