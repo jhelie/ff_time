@@ -590,10 +590,11 @@ def check_ff(f_nb, t, box_dim):
 			#check mid-point time criteria
 			if ff_t_mid[l_index] == 0:
 				#find PO4 neighbours within args.ngh_dist 
-				tmp_neighbours = leaflet_sele["both"].selectAtoms("around " + str(args.ngh_dist) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
+				tmp_sele = leaflet_sele["both"] + lipids_sele_ff_bead[l_index]
+				tmp_neighbours = tmp_sele.selectAtoms("around " + str(args.ngh_dist) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
 				
 				#check how many belown to the lower leaflet compared to the upper leaflet
-				tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)
+				tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)				
 				if len(tmp_neighbours) > 0:
 					tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
 					if tmp_ratio > 0.5:
@@ -660,7 +661,8 @@ def check_ff(f_nb, t, box_dim):
 			#check mid-point time criteria
 			if ff_t_mid[l_index] == 0:
 				#find PO4 neighbours within args.ngh_dist 
-				tmp_neighbours = leaflet_sele["both"].selectAtoms("around " + str(args.ngh_dist) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
+				tmp_sele = leaflet_sele["both"] + lipids_sele_ff_bead[l_index]
+				tmp_neighbours = tmp_sele.selectAtoms("around " + str(args.ngh_dist) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
 				
 				#check how many belown to the upper leaflet compared to the lower leaflet
 				tmp_neighbours = np.in1d(tmp_neighbours, upper_resnums)
