@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser(prog='ff_times', usage='', add_help=False, form
 **********************************************
 v''' + version_nb + '''
 author: Jean Helie (jean.helie@bioch.ox.ac.uk)
-git: https://github.com/jhelie/ff_time
+git: https://github.com/jhelie/ff_times
 **********************************************
 	
 [ DESCRITPION ]
@@ -83,17 +83,20 @@ The following python modules are needed:
     This means that the bilayer should be as flat as possible in the gro file supplied in
     order to get a meaningful outcome.
 
-3. The same approach as in ff_detect is used. Flip-flopping lipids are considered to have
+3. 
+   (a) The same approach as in ff_detect is used. Flip-flopping lipids are considered to have
    flip-flopped when more of their neighbours within the distance --ngh_dist belong to 
    the opposite leaflet than to their starting leaflet. The first time at which this happens
    is the mid-point time.
    
-   To detect when flip-flops start/end the distance of the flip-flopping lipids --bead
+   (b) To detect when flip-flops start/end the distance of the flip-flopping lipids --bead
    particle to the center of geometry (COG) of the --ngh_nb nearest neighbours in each
    leaflet is calculated and a local core membrane layer is defined relative to this distance
    using a fraction of the distance, --ngh_frac,  between those inter-leaflets COGs: t_start
    corresponds to when the flip-flopping lipid enters this core layer (false starts, ie if it
    comes out again, are taken into account) and t_end corresponds to when it leaves it.
+   
+   NB: --ngh_dist and --ngh_nb are unrelated.
     
 
 [ USAGE ]
@@ -115,11 +118,9 @@ Leaflets identification (see note 2)
 Flip-flops identification
 -----------------------------------------------------
 --flipflops		: input file with flipflopping lipids (output of ff_detect)
-
---ngh_dist	[15]	: flip-flops detection method, see note 3
---ngh_nb	[15]	: flip-flops detection method, see note 3
---ngh_frac [0.1]	: fraction of distance between interleaflet neighbours for flipflops start/end detection, see note 2
-
+--ngh_dist	[15]	: distance (Angstrom) within which to consider neighbours for ff time, see note 3(a)
+--ngh_nb	[5]	: nb of closest neighbours in each leaflet, see note 3(b)
+--ngh_frac 	[0.1]	: fraction of distance between interleaflet neighbours COGs, see note 3(b)
 --reverse		: browse xtc backwards [TO DO]
  
 Other options
@@ -143,7 +144,9 @@ parser.add_argument('--leaflets', nargs=1, dest='cutoff_leaflet', default=['opti
 
 #flip-flops identification
 parser.add_argument('--flipflops', nargs=1, dest='selection_file_ff', help=argparse.SUPPRESS, required=True)
-parser.add_argument('--neighbours', nargs=1, dest='neighbours', default=[15], help=argparse.SUPPRESS)
+parser.add_argument('--ngh_dist', nargs=1, dest='ngh_dist', default=[15], type=int, help=argparse.SUPPRESS)
+parser.add_argument('--ngh_nb', nargs=1, dest='ngh_nb', default=[5], type=int, help=argparse.SUPPRESS)
+parser.add_argument('--ngh_frac', nargs=1, dest='ngh_frac', default=[0.1], type=float, help=argparse.SUPPRESS)
 parser.add_argument('--reverse', dest='reverse', action='store_true', help=argparse.SUPPRESS)
 
 #other options
@@ -169,7 +172,9 @@ args.beadname = args.beadname[0]
 args.cutoff_leaflet = args.cutoff_leaflet[0]
 #flip-flops identification
 args.selection_file_ff = args.selection_file_ff[0]
-args.neighbours = float(args.neighbours[0])
+args.ngh_dist = args.ngh_dist[0]
+args.ngh_nb = args.ngh_nb[0]
+args.ngh_frac = args.ngh_frac[0]
 
 #=========================================================================================
 # import modules (doing it now otherwise might crash before we can display the help menu!)
@@ -236,8 +241,14 @@ if not os.path.isfile(args.xtcfilename):
 if not os.path.isfile(args.selection_file_ff):
 	print "Error: file " + str(args.selection_file_ff) + " not found."
 	sys.exit(1)
-if args.neighbours < 0:
-	print "Error: --neighbours should be greater than 0, see note 3"
+if args.ngh_dist < 0:
+	print "Error: --ngh_dist should be greater than 0, see note 3(a)."
+	sys.exit(1)
+if args.ngh_nb < 0:
+	print "Error: --ngh_nb should be greater than 0, see note 3(b)."
+	sys.exit(1)
+if args.ngh_frac < 0 or args.ngh_frac > 0.5:
+	print "Error: --ngh_dist should be between 0 and 0.5, see note 3(b)."
 	sys.exit(1)
 if args.cutoff_leaflet != "large" and args.cutoff_leaflet != "optimise":
 	try:
@@ -368,6 +379,7 @@ def identify_ff():
 	lipids_sele_ff_bonds = {}
 	lipids_sele_ff_VMD_string={}
 		
+	#read flip-flopping lipids info and create selection string to exclude them from leaflets selection
 	with open(args.selection_file_ff) as f:
 		lines = f.readlines()
 	lipids_ff_nb = len(lines)
@@ -484,8 +496,8 @@ def identify_leaflets():
 		print " -found 2 leaflets: ", leaflet_sele["upper"].numberOfResidues(), '(upper) and ', leaflet_sele["lower"].numberOfResidues(), '(lower) lipids'
 
 	#store resnums (avoid repetitive access)
-	upper_resnums =leaflet_sele["upper"].resnums()
-	lower_resnums =leaflet_sele["lower"].resnums()
+	upper_resnums = leaflet_sele["upper"].resnums()
+	lower_resnums = leaflet_sele["lower"].resnums()
 		
 	return
 
@@ -493,37 +505,169 @@ def identify_leaflets():
 # core functions
 #=========================================================================================
 
-def check_ff(f_nb, t):
+def calculate_cog(tmp_coords, box_dim):
 	
-	global ff_times
+	#this method allows to take pbc into account when calculcating the center of geometry 
+	#see: http://en.wikipedia.org/wiki/Center_of_mass#Systems_with_periodic_boundary_conditions
+		
+	cog_coord = np.zeros(3)
+	tmp_nb_atoms = np.shape(tmp_coords)[0]
+	
+	for n in range(0,3):
+		tet = tmp_coords[:,n] * 2 * math.pi / float(box_dim[n])
+		xsi = np.cos(tet)
+		zet = np.sin(tet)
+		tet_avg = math.atan2(-np.average(zet),-np.average(xsi)) + math.pi
+		cog_coord[n] = tet_avg * box_dim[n] / float(2*math.pi)
+	
+	return cog_coord
+
+def check_ff(f_nb, t, box_dim):
+	
+	global ff_t_mid, ff_t_start, ff_t_mid
 	global ff_nb_u2l
 	global ff_nb_l2u
 	
+	ff_counter = 0
+	
 	#upper to lower
+	#==============
+	#initialise nb of lipids having flip-flopped using previous frame value
 	if f_nb > 0:
 		ff_nb_u2l[f_nb] = ff_nb_u2l[f_nb-1]
+	
+	#process each flip-flopping lipids
+	#---------------------------------
 	for l_index in lipids_ff_u2l_index:
-		if ff_times[l_index] == 0:
-			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
-			tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)
-			if len(tmp_neighbours)> 0:
-				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
-				if tmp_ratio > 0.5:
-					ff_times[l_index] = t
-					ff_nb_u2l[f_nb] += 1
+
+		#display update
+		ff_counter += 1
+		progress = '\r -processing frame ' + str(f_nb+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' from frame ' + str(f_start) + ' to ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + '), flip-flopping lipid ' + str(ff_counter) + '/' + str(lipids_ff_nb) + '         '
+		sys.stdout.flush()
+		sys.stdout.write(progress)
+
+		if ff_t_end[l_index] == 0:
+			tmp_ff_coord = lipids_sele_ff_bead[l_index].coordinates()
+
+			#calculate distances with other PO4 in lower and upper leaflets
+			d_lower = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, tmp_lower_coord, box_dim)
+			d_upper = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, tmp_upper_coord, box_dim)
+	
+			#get cutoff distance for n nearest neighbours
+			d_lower.sort(axis=1)
+			d_upper.sort(axis=1)
+			cutoff_lower = d_lower[0,args.ngh_nb-1]+0.001
+			cutoff_upper = d_upper[0,args.ngh_nb-1]+0.001
+
+			#get n closest neighbours in each leaflet
+			lower_tmp = leaflet_sele["lower"] + lipids_sele_ff_bead[l_index]	#that's because around requires the reference object to belong to the selection in which we look for neighbours!
+			upper_tmp = leaflet_sele["upper"] + lipids_sele_ff_bead[l_index]	
+			lower_neighbours = lower_tmp.selectAtoms("around " + str(cutoff_lower) + " (resname " + str(lipids_ff_info[l_index][0]) + " and resid " + str(lipids_ff_info[l_index][1]) + ")")
+			upper_neighbours = upper_tmp.selectAtoms("around " + str(cutoff_upper) + " (resname " + str(lipids_ff_info[l_index][0]) + " and resid " + str(lipids_ff_info[l_index][1]) + ")")
+
+			#calculate center of geometry of n closest neighbours in each leaflet
+			lower_cog = calculate_cog(lower_neighbours.coordinates(), box_dim)
+			upper_cog = calculate_cog(upper_neighbours.coordinates(), box_dim)
+	
+			#calculate distance between current lipid and each center of geo
+			d_lower_geo = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, lower_cog, box_dim)
+			d_upper_geo = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, upper_cog, box_dim)
+			d_inter_geo = MDAnalysis.analysis.distances.distance_array(lower_cog, upper_cog, box_dim)
+
+			#check for beginning of flip flop
+			if ff_t_start[l_index] == 0 and d_upper_geo > args.ngh_frac * d_inter_geo:
+				ff_t_start[l_index] = t
+		
+			#deal with false starts
+			elif d_upper_geo < args.ngh_frac * d_inter_geo:
+				ff_t_start[l_index] = 0
+		
+			#check for end of flip_lfop
+			if d_lower_geo < args.ngh_frac * d_inter_geo:
+				ff_t_start[l_index] = t
+
+			#check mid-point time criteria
+			if ff_t_mid[l_index] == 0:
+				#find PO4 neighbours within args.ngh_dist 
+				tmp_neighbours = leaflet_sele["both"].selectAtoms("around " + str(args.ngh_dist) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
+				
+				#check how many belown to the lower leaflet compared to the upper leaflet
+				tmp_neighbours = np.in1d(tmp_neighbours, lower_resnums)
+				if len(tmp_neighbours) > 0:
+					tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
+					if tmp_ratio > 0.5:
+						ff_t_mid[l_index] = t
+						ff_nb_u2l[f_nb] += 1
+
 	
 	#lower to upper
+	#==============
+	#initialise nb of lipids having flip-flopped using previous frame value
 	if f_nb > 0:
 		ff_nb_l2u[f_nb] = ff_nb_l2u[f_nb-1]
+	
+	#process each flip-flopping lipids
+	#---------------------------------
 	for l_index in lipids_ff_l2u_index:
-		if ff_times[l_index] == 0:
-			tmp_neighbours = U_lip.selectAtoms("around " + str(args.neighbours) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
-			tmp_neighbours = np.in1d(tmp_neighbours, upper_resnums)
-			if len(tmp_neighbours) > 0:
-				tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
-				if tmp_ratio > 0.5:
-					ff_times[l_index] = t
-					ff_nb_l2u[f_nb] += 1
+
+		#display update
+		ff_counter += 1
+		progress = '\r -processing frame ' + str(f_nb+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' from frame ' + str(f_start) + ' to ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + '), flip-flopping lipid ' + str(ff_counter) + '/' + str(lipids_ff_nb) + '         '
+		sys.stdout.flush()
+		sys.stdout.write(progress)
+
+		if ff_t_end[l_index] == 0:
+			tmp_ff_coord = lipids_sele_ff_bead[l_index].coordinates()
+
+			#calculate distances with other PO4 in lower and upper leaflets
+			d_lower = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, tmp_lower_coord, box_dim)
+			d_upper = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, tmp_upper_coord, box_dim)
+	
+			#get cutoff distance for n nearest neighbours
+			d_lower.sort(axis=1)
+			d_upper.sort(axis=1)
+			cutoff_lower = d_lower[0,args.ngh_nb-1]+0.001
+			cutoff_upper = d_upper[0,args.ngh_nb-1]+0.001
+
+			#get n closest neighbours in each leaflet
+			lower_tmp = leaflet_sele["lower"] + lipids_sele_ff_bead[l_index]	#that's because around requires the reference object to belong to the selection in which we look for neighbours!
+			upper_tmp = leaflet_sele["upper"] + lipids_sele_ff_bead[l_index]	
+			lower_neighbours = lower_tmp.selectAtoms("around " + str(cutoff_lower) + " (resname " + str(lipids_ff_info[l_index][0]) + " and resid " + str(lipids_ff_info[l_index][1]) + ")")
+			upper_neighbours = upper_tmp.selectAtoms("around " + str(cutoff_upper) + " (resname " + str(lipids_ff_info[l_index][0]) + " and resid " + str(lipids_ff_info[l_index][1]) + ")")
+
+			#calculate center of geometry of n closest neighbours in each leaflet
+			lower_cog = calculate_cog(lower_neighbours.coordinates(), box_dim)
+			upper_cog = calculate_cog(upper_neighbours.coordinates(), box_dim)
+	
+			#calculate distance between current lipid and each center of geo
+			d_lower_geo = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, lower_cog, box_dim)
+			d_upper_geo = MDAnalysis.analysis.distances.distance_array(tmp_ff_coord, upper_cog, box_dim)
+			d_inter_geo = MDAnalysis.analysis.distances.distance_array(lower_cog, upper_cog, box_dim)
+
+			#check for beginning of flip flop
+			if ff_t_start[l_index] == 0 and d_lower_geo > args.ngh_frac * d_inter_geo:
+				ff_t_start[l_index] = t
+		
+			#deal with false starts
+			elif d_lower_geo < args.ngh_frac * d_inter_geo:
+				ff_t_start[l_index] = 0
+		
+			#check for end of flip_lfop
+			if d_upper_geo < args.ngh_frac * d_inter_geo:
+				ff_t_start[l_index] = t
+
+			#check mid-point time criteria
+			if ff_t_mid[l_index] == 0:
+				#find PO4 neighbours within args.ngh_dist 
+				tmp_neighbours = leaflet_sele["both"].selectAtoms("around " + str(args.ngh_dist) + " (resid " + str(lipids_ff_info[l_index][1]) + " and resname " + str(lipids_ff_info[l_index][0]) + ")").resnums()
+				
+				#check how many belown to the upper leaflet compared to the lower leaflet
+				tmp_neighbours = np.in1d(tmp_neighbours, upper_resnums)
+				if len(tmp_neighbours) > 0:
+					tmp_ratio = len(tmp_neighbours[tmp_neighbours==True]) / len(tmp_neighbours)
+					if tmp_ratio > 0.5:
+						ff_t_mid[l_index] = t
+						ff_nb_l2u[f_nb] += 1
 
 	return
 
@@ -538,11 +682,11 @@ def write_sele_update():
 	output_txt = open(filename_txt, 'w')
 	#upper to lower
 	for l_index in lipids_ff_u2l_index:
-		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(lipids_ff_info[l_index][2]) + "," + str(lipids_ff_info[l_index][3]) + "," + str(ff_t_start[l_index]) + "," + str(ff_t_end[l_index]) + "\n")
 	
 	#lower to upper
 	for l_index in lipids_ff_l2u_index:
-		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(lipids_ff_info[l_index][2]) + "," + str(lipids_ff_info[l_index][3]) + "," + str(ff_t_start[l_index]) + "," + str(ff_t_end[l_index]) + "\n")
 	output_txt.close()
 	return
 
@@ -557,14 +701,14 @@ def write_txt_times():
 	output_txt.write("upper to lower\n")
 	output_txt.write("--------------\n")
 	for l_index in lipids_ff_u2l_index:
-		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_t_mid[l_index]) + "," + str(ff_t_end[l_index] - ff_t_start[l_index]) + "\n")
 	
 	#lower to upper
 	output_txt.write("\n")
 	output_txt.write("lower to upper\n")
 	output_txt.write("--------------\n")
 	for l_index in lipids_ff_l2u_index:
-		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_times[l_index]) + "\n")
+		output_txt.write(str(lipids_ff_info[l_index][0]) + "," + str(lipids_ff_info[l_index][1]) + "," + str(ff_t_mid[l_index]) + "," + str(ff_t_end[l_index] - ff_t_start[l_index]) + "\n")
 	output_txt.close()
 	return
 def write_xvg_evolution():
@@ -604,11 +748,14 @@ identify_ff()
 identify_leaflets()
 
 #create data structures
-global ff_times
+global ff_t_mid, ff_t_start, ff_t_end			#to store mid-point time, t_start and t_end (in ns)
 global ff_nb_u2l
 global ff_nb_l2u
 global frames_time
-ff_times = np.zeros(lipids_ff_nb)
+global tmp_upper_coord, tmp_lower_coord
+ff_t_mid = np.zeros(lipids_ff_nb)
+ff_t_start = np.zeros(lipids_ff_nb)
+ff_t_end = np.zeros(lipids_ff_nb)
 ff_nb_u2l = np.zeros(nb_frames_to_process)
 ff_nb_l2u = np.zeros(nb_frames_to_process)
 frames_time = np.zeros(nb_frames_to_process)
@@ -617,12 +764,14 @@ frames_time = np.zeros(nb_frames_to_process)
 print "\nChecking for flip-flopping status..."
 for f_index in range(0,nb_frames_to_process):
 	ts = U.trajectory[frames_to_process[f_index]]
-	progress = '\r -processing frame ' + str(f_index+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' frame(s) from frame ' + str(f_start) + ' to frame ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ')      '  
-	sys.stdout.flush()
-	sys.stdout.write(progress)
+	#progress = '\r -processing frame ' + str(f_index+1) + '/' + str(nb_frames_to_process) + ' (every ' + str(args.frames_dt) + ' frame(s) from frame ' + str(f_start) + ' to frame ' + str(f_end) + ' out of ' + str(nb_frames_xtc) + ')      '  
+	#sys.stdout.flush()
+	#sys.stdout.write(progress)
 		
 	frames_time[f_index] = ts.time/float(1000)
-	check_ff(f_index, ts.time/float(1000))
+	tmp_upper_coord = leaflet_sele["upper"].coordinates()
+	tmp_lower_coord = leaflet_sele["lower"].coordinates()
+	check_ff(f_index, ts.time/float(1000), ts.dimensions)
 
 #create outputs
 print "\n\nWriting results files..."
