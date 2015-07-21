@@ -681,7 +681,7 @@ def check_ff(f_nb, t, box_dim):
 def write_sele_update():
 	
 	print " -updating selection file '" + str(args.selection_file_ff) + "'..."	
-	filename_txt = os.getcwd() + '/' + str(args.output_folder) + '/' + str(args.selection_file_ff[:-4].split('/')[-1]) + '_update.sele'
+	filename_txt = os.getcwd() + '/' + str(args.output_folder) + '/' + str(args.selection_file_ff[:-5].split('/')[-1]) + '_update.sele'
 	output_txt = open(filename_txt, 'w')
 	#upper to lower
 	for l_index in lipids_ff_u2l_index:
